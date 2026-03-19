@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { SearchParams, TripType } from "@/lib/types";
+import AirportInput from "@/components/AirportInput";
 
 interface Props {
   onSearch: (params: SearchParams) => void;
@@ -41,8 +42,9 @@ export default function SearchForm({ onSearch, isLoading }: Props) {
   }
 
   function swapCities() {
+    const tmp = origin;
     setOrigin(destination);
-    setDestination(origin);
+    setDestination(tmp);
   }
 
   return (
@@ -109,24 +111,13 @@ export default function SearchForm({ onSearch, isLoading }: Props) {
       {/* Main search fields */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_auto_1fr_1fr_1fr] gap-3 items-end">
         {/* Origin */}
-        <div>
-          <label
-            htmlFor="origin"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
-            From
-          </label>
-          <input
-            id="origin"
-            type="text"
-            value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
-            placeholder="e.g. NRT"
-            maxLength={3}
-            required
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase placeholder:normal-case text-gray-900"
-          />
-        </div>
+        <AirportInput
+          id="origin"
+          label="From"
+          placeholder="e.g. Tokyo, NRT"
+          value={origin}
+          onChange={setOrigin}
+        />
 
         {/* Swap button */}
         <button
@@ -141,24 +132,13 @@ export default function SearchForm({ onSearch, isLoading }: Props) {
         </button>
 
         {/* Destination */}
-        <div>
-          <label
-            htmlFor="destination"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
-            To
-          </label>
-          <input
-            id="destination"
-            type="text"
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            placeholder="e.g. SIN"
-            maxLength={3}
-            required
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase placeholder:normal-case text-gray-900"
-          />
-        </div>
+        <AirportInput
+          id="destination"
+          label="To"
+          placeholder="e.g. Singapore, SIN"
+          value={destination}
+          onChange={setDestination}
+        />
 
         {/* Departure date */}
         <div>

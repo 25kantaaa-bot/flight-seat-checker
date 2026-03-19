@@ -53,9 +53,13 @@ function jpy(n: number, rate: number): string {
 
 function SeatBadge({ seats }: { seats: number | null }) {
   if (seats === null) {
+    // Google Flights doesn't show seat count when plenty of seats are available
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-600">
-        Available
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-50 text-green-600">
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+        Seats available
       </span>
     );
   }
@@ -72,11 +76,11 @@ function SeatBadge({ seats }: { seats: number | null }) {
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
         urgent
-          ? "bg-orange-100 text-orange-700"
-          : "bg-green-100 text-green-700"
+          ? "bg-orange-100 text-orange-700 animate-pulse"
+          : "bg-yellow-100 text-yellow-700"
       }`}
     >
-      {label} left
+      🔥 {label} left
     </span>
   );
 }
