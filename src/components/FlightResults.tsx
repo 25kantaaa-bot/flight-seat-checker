@@ -54,13 +54,20 @@ function jpy(n: number, rate: number): string {
 function SeatBadge({ seats }: { seats: number | null }) {
   if (seats === null) {
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500">
-        N/A
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-600">
+        Available
+      </span>
+    );
+  }
+  if (seats === 0) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 text-red-700">
+        Sold out
       </span>
     );
   }
   const label = seats >= 9 ? "9+" : String(seats);
-  const urgent = seats > 0 && seats <= 3;
+  const urgent = seats <= 3;
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
@@ -69,7 +76,7 @@ function SeatBadge({ seats }: { seats: number | null }) {
           : "bg-green-100 text-green-700"
       }`}
     >
-      {label}
+      {label} left
     </span>
   );
 }

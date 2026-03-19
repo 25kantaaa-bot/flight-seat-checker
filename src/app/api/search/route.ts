@@ -1,82 +1,176 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchAllCabins, searchFlights, getSeatMapsForOffers } from "@/lib/duffel";
+import {
+  searchGoogleFlights,
+  type SerpApiFlight,
+  type SerpApiResponse,
+} from "@/lib/serpapi";
 import { getAirlineName } from "@/lib/airlines";
 import type { FlightOffer, CabinAvailability } from "@/lib/types";
 
-/** Duffel cabin class → display name */
-const CABIN_DISPLAY: Record<string, string> = {
-  economy: "Economy",
-  premium_economy: "Premium Econ",
-  business: "Business",
-  first: "First",
-};
-
-/** ISO 8601 duration (e.g. "PT2H30M", "P1DT2H20M") → "26h 20m" */
-function formatDuration(iso: string): string {
-  const match = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/);
-  if (!match) return iso;
-  const days = parseInt(match[1] || "0");
-  const hours = parseInt(match[2] || "0") + days * 24;
-  const minutes = parseInt(match[3] || "0");
-  const h = hours ? `${hours}h` : "";
-  const m = minutes ? ` ${minutes}m` : "";
-  return `${h}${m}`.trim() || "0m";
+/** Extract IATA airline code from flight number like "NH 843" or "JL 123" */
+function extractAirlineCode(flightNumber: string): string {
+  const match = flightNumber.match(/^([A-Z0-9]{2})\s/);
+  return match ? match[1] : flightNumber.slice(0, 2);
 }
 
-/** ISO 8601 duration → total minutes */
-function durationToMinutes(iso: string): number {
-  const match = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/);
-  if (!match) return 0;
-  const days = parseInt(match[1] || "0");
-  return days * 1440 + parseInt(match[2] || "0") * 60 + parseInt(match[3] || "0");
+/** Extract seats remaining from Google Flights extensions */
+function extractSeatsLeft(extensions?: string[]): number | null {
+  if (!extensions) return null;
+  for (const ext of extensions) {
+    // Google Flights shows "X seats left" when availability is low
+    const match = ext.match(/(\d+)\s*seat/i);
+    if (match) return parseInt(match[1]);
+  }
+  return null;
 }
 
-/** Calculate duration between two ISO timestamps → ISO 8601 duration string */
-function calcDuration(dep: string, arr: string): string {
-  const ms = new Date(arr).getTime() - new Date(dep).getTime();
-  const totalMinutes = Math.round(ms / 60000);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return `PT${h}H${m}M`;
+/** Map Google Flights travel_class to display name */
+function mapTravelClassDisplay(travelClass: string): string {
+  const lower = travelClass.toLowerCase();
+  if (lower.includes("first")) return "First";
+  if (lower.includes("business")) return "Business";
+  if (lower.includes("premium")) return "Premium Econ";
+  return "Economy";
 }
 
-/** Map frontend cabin class value to Duffel cabin class */
-function mapCabinClass(value: string): string {
+/** Map display name to booking class key */
+function mapBookingClass(display: string): string {
   const map: Record<string, string> = {
-    ECONOMY: "economy",
-    PREMIUM_ECONOMY: "premium_economy",
-    BUSINESS: "business",
-    FIRST: "first",
-    ALL: "all",
+    Economy: "economy",
+    "Premium Econ": "premium_economy",
+    Business: "business",
+    First: "first",
   };
-  return map[value] || "all";
+  return map[display] || "economy";
 }
 
-// Duffel offer shape (partial)
-interface DuffelSegment {
-  origin: { iata_code: string };
-  destination: { iata_code: string };
-  departing_at: string;
-  arriving_at: string;
-  marketing_carrier: { iata_code: string; name: string };
-  marketing_carrier_flight_number: string;
-  duration: string;
+/** Format minutes to "Xh Ym" */
+function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const hStr = h ? `${h}h` : "";
+  const mStr = m ? ` ${m}m` : "";
+  return `${hStr}${mStr}`.trim() || "0m";
 }
 
-interface DuffelSlice {
-  duration: string;
-  segments: DuffelSegment[];
+/** Parse SerpApi time string "2026-03-25 at 10:30" or ISO format to ISO string */
+function parseTime(timeStr: string, dateHint?: string): string {
+  // Handle "HH:MM" format with a date from somewhere
+  if (/^\d{2}:\d{2}$/.test(timeStr) && dateHint) {
+    return `${dateHint}T${timeStr}:00`;
+  }
+  // Handle ISO format
+  if (timeStr.includes("T")) return timeStr;
+  // Handle "2026-03-25 at 10:30 AM" or similar
+  const cleaned = timeStr
+    .replace(" at ", "T")
+    .replace(/\s*(AM|PM)/i, (_, period) => ` ${period}`);
+  // Try to parse
+  const d = new Date(cleaned);
+  if (!isNaN(d.getTime())) return d.toISOString();
+  return timeStr;
 }
 
-interface DuffelOffer {
-  id: string;
-  slices: DuffelSlice[];
-  total_amount: string;
-  total_currency: string;
-  passengers: Array<{ type: string }>;
-  payment_requirements: Record<string, unknown>;
-  available_services?: unknown[];
-  cabin_class?: string;
+function processFlights(
+  serpFlights: SerpApiFlight[],
+  flightMap: Map<string, FlightOffer>,
+  adults: number,
+  cabinOverride?: string
+): void {
+  for (const serpFlight of serpFlights) {
+    if (!serpFlight.flights || serpFlight.flights.length === 0) continue;
+
+    const segments = serpFlight.flights;
+    const firstSeg = segments[0];
+    const lastSeg = segments[segments.length - 1];
+
+    // Build flight identity
+    const flightNumbers = segments
+      .map((s) => s.flight_number.replace(/\s+/g, ""))
+      .join("-");
+    const depTime = firstSeg.departure_airport.time;
+    const flightKey = `${flightNumbers}_${depTime}`;
+
+    // Determine cabin class
+    const cabinDisplay =
+      cabinOverride || mapTravelClassDisplay(firstSeg.travel_class || "Economy");
+
+    // Price per passenger
+    const totalPrice = serpFlight.price || 0;
+    const perPassengerPrice = totalPrice / adults;
+
+    // Seats left (from extensions)
+    const seatsLeft =
+      extractSeatsLeft(serpFlight.extensions) ??
+      extractSeatsLeft(firstSeg.extensions);
+
+    const cabin: CabinAvailability = {
+      cabin: cabinDisplay,
+      seatsAvailable: seatsLeft,
+      price: perPassengerPrice.toFixed(2),
+      currency: "USD",
+      bookingClass: mapBookingClass(cabinDisplay),
+    };
+
+    const airlineCode = extractAirlineCode(firstSeg.flight_number);
+
+    if (flightMap.has(flightKey)) {
+      const existing = flightMap.get(flightKey)!;
+      const existingCabin = existing.cabins.find((c) => c.cabin === cabin.cabin);
+      if (!existingCabin) {
+        existing.cabins.push(cabin);
+      } else if (parseFloat(cabin.price) < parseFloat(existingCabin.price)) {
+        existingCabin.price = cabin.price;
+        // Update seats if we have new info
+        if (cabin.seatsAvailable !== null) {
+          existingCabin.seatsAvailable = cabin.seatsAvailable;
+        }
+      }
+      if (perPassengerPrice > 0 && perPassengerPrice < existing.lowestPrice) {
+        existing.lowestPrice = perPassengerPrice;
+      }
+    } else {
+      const totalDuration = serpFlight.total_duration || 0;
+
+      flightMap.set(flightKey, {
+        id: flightKey,
+        airlineCode,
+        airline: firstSeg.airline || airlineCode,
+        airlineName:
+          getAirlineName(airlineCode) || firstSeg.airline || airlineCode,
+        flightNumber: flightNumbers,
+        departure: firstSeg.departure_airport.id,
+        arrival: lastSeg.arrival_airport.id,
+        departureTime: parseTime(
+          firstSeg.departure_airport.time,
+          firstSeg.departure_airport.time?.slice(0, 10)
+        ),
+        arrivalTime: parseTime(
+          lastSeg.arrival_airport.time,
+          lastSeg.arrival_airport.time?.slice(0, 10)
+        ),
+        duration: formatDuration(totalDuration),
+        durationMinutes: totalDuration,
+        stops: segments.length - 1,
+        cabins: [cabin],
+        lowestPrice: perPassengerPrice || 0,
+        currency: "USD",
+        segments: segments.map((seg) => ({
+          departure: {
+            iataCode: seg.departure_airport.id,
+            at: parseTime(seg.departure_airport.time),
+          },
+          arrival: {
+            iataCode: seg.arrival_airport.id,
+            at: parseTime(seg.arrival_airport.time),
+          },
+          carrierCode: extractAirlineCode(seg.flight_number),
+          number: seg.flight_number.replace(/^[A-Z0-9]{2}\s*/, ""),
+          duration: formatDuration(seg.duration || 0),
+        })),
+      });
+    }
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -90,7 +184,10 @@ export async function GET(request: NextRequest) {
 
   if (!origin || !destination || !departureDate) {
     return NextResponse.json(
-      { flights: [], error: "Origin, destination, and departure date are required." },
+      {
+        flights: [],
+        error: "Origin, destination, and departure date are required.",
+      },
       { status: 400 }
     );
   }
@@ -118,129 +215,39 @@ export async function GET(request: NextRequest) {
       adults,
     };
 
-    let allOffers: unknown[];
-    const duffelCabin = mapCabinClass(cabinClass);
+    let data: SerpApiResponse;
 
-    if (duffelCabin === "all") {
-      const data = await searchAllCabins(baseParams);
-      allOffers = data.offers;
+    if (cabinClass === "ALL") {
+      // Search single request (economy by default, Google Flights shows all)
+      data = await searchGoogleFlights({ ...baseParams, cabinClass: "ECONOMY" });
     } else {
-      const raw = await searchFlights({ ...baseParams, cabinClass: duffelCabin });
-      allOffers = raw.data?.offers || [];
+      data = await searchGoogleFlights({ ...baseParams, cabinClass });
     }
 
-    // Group offers by flight identity
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
     const flightMap = new Map<string, FlightOffer>();
-    // Track one offer ID per flight key for seat map lookups
-    const flightOfferIds = new Map<string, string>();
 
-    for (const rawOffer of allOffers) {
-      const offer = rawOffer as DuffelOffer;
-      const firstSlice = offer.slices[0];
-      if (!firstSlice || !firstSlice.segments.length) continue;
+    // Determine cabin override based on search
+    const cabinOverride =
+      cabinClass !== "ALL"
+        ? mapTravelClassDisplay(
+            cabinClass === "PREMIUM_ECONOMY"
+              ? "Premium Economy"
+              : cabinClass.charAt(0) + cabinClass.slice(1).toLowerCase()
+          )
+        : undefined;
 
-      const segments = firstSlice.segments;
-      const firstSeg = segments[0];
-      const lastSeg = segments[segments.length - 1];
-
-      // Determine cabin class from the offer
-      // Duffel puts cabin_class in the top-level offer when requested
-      const cabinRaw = offer.cabin_class || "economy";
-      const cabinDisplay = CABIN_DISPLAY[cabinRaw] || cabinRaw;
-
-      // Price per passenger (Duffel total_amount is for all passengers)
-      const totalPrice = parseFloat(offer.total_amount);
-      const perPassengerPrice = totalPrice / adults;
-
-      const cabin: CabinAvailability = {
-        cabin: cabinDisplay,
-        seatsAvailable: null, // Duffel doesn't give seat count in offer search
-        price: perPassengerPrice.toFixed(2),
-        currency: offer.total_currency,
-        bookingClass: cabinRaw,
-      };
-
-      // Build flight identity key
-      const flightNumbers = segments
-        .map((s) => `${s.marketing_carrier.iata_code}${s.marketing_carrier_flight_number}`)
-        .join("-");
-      const flightKey = `${flightNumbers}_${firstSeg.departing_at}`;
-
-      // Calculate total duration
-      const sliceDuration = firstSlice.duration || calcDuration(firstSeg.departing_at, lastSeg.arriving_at);
-
-      // Store first offer ID for this flight (for seat map lookup)
-      if (!flightOfferIds.has(flightKey)) {
-        flightOfferIds.set(flightKey, offer.id);
-      }
-
-      if (flightMap.has(flightKey)) {
-        const existing = flightMap.get(flightKey)!;
-        const existingCabin = existing.cabins.find((c) => c.cabin === cabin.cabin);
-        if (!existingCabin) {
-          existing.cabins.push(cabin);
-        } else if (parseFloat(cabin.price) < parseFloat(existingCabin.price)) {
-          existingCabin.price = cabin.price;
-          existingCabin.currency = cabin.currency;
-        }
-        if (perPassengerPrice < existing.lowestPrice) {
-          existing.lowestPrice = perPassengerPrice;
-          existing.currency = offer.total_currency;
-        }
-      } else {
-        const carrierCode = firstSeg.marketing_carrier.iata_code;
-        flightMap.set(flightKey, {
-          id: offer.id,
-          airlineCode: carrierCode,
-          airline: firstSeg.marketing_carrier.name || carrierCode,
-          airlineName: getAirlineName(carrierCode) || firstSeg.marketing_carrier.name || carrierCode,
-          flightNumber: flightNumbers,
-          departure: firstSeg.origin.iata_code,
-          arrival: lastSeg.destination.iata_code,
-          departureTime: firstSeg.departing_at,
-          arrivalTime: lastSeg.arriving_at,
-          duration: formatDuration(sliceDuration),
-          durationMinutes: durationToMinutes(sliceDuration),
-          stops: segments.length - 1,
-          cabins: [cabin],
-          lowestPrice: perPassengerPrice,
-          currency: offer.total_currency,
-          segments: segments.map((seg) => ({
-            departure: { iataCode: seg.origin.iata_code, at: seg.departing_at },
-            arrival: { iataCode: seg.destination.iata_code, at: seg.arriving_at },
-            carrierCode: seg.marketing_carrier.iata_code,
-            number: seg.marketing_carrier_flight_number,
-            duration: formatDuration(seg.duration || calcDuration(seg.departing_at, seg.arriving_at)),
-          })),
-        } satisfies FlightOffer);
-      }
+    // Process best flights
+    if (data.best_flights) {
+      processFlights(data.best_flights, flightMap, adults, cabinOverride);
     }
 
-    // Fetch seat maps to get real availability counts
-    const seatMapRequests = Array.from(flightOfferIds.entries()).map(
-      ([flightKey, offerId]) => ({ offerId, flightKey })
-    );
-    const seatMapData = await getSeatMapsForOffers(seatMapRequests);
-
-    // Cabin class display name → Duffel cabin class key mapping
-    const displayToDuffel: Record<string, string> = {
-      "Economy": "economy",
-      "Premium Econ": "premium_economy",
-      "Business": "business",
-      "First": "first",
-    };
-
-    // Merge seat counts into flight cabins
-    for (const [flightKey, flight] of flightMap) {
-      const counts = seatMapData.get(flightKey);
-      if (counts) {
-        for (const cabin of flight.cabins) {
-          const duffelClass = displayToDuffel[cabin.cabin] || cabin.bookingClass;
-          if (duffelClass in counts) {
-            cabin.seatsAvailable = counts[duffelClass];
-          }
-        }
-      }
+    // Process other flights
+    if (data.other_flights) {
+      processFlights(data.other_flights, flightMap, adults, cabinOverride);
     }
 
     // Sort cabins and assign IDs
@@ -256,8 +263,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ flights });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "An unknown error occurred.";
+    const message =
+      error instanceof Error ? error.message : "An unknown error occurred.";
     console.error("Flight search error:", message);
-    return NextResponse.json({ flights: [], error: message }, { status: 500 });
+    return NextResponse.json(
+      { flights: [], error: message },
+      { status: 500 }
+    );
   }
 }
