@@ -95,6 +95,9 @@ function processFlights(
   for (const serpFlight of serpFlights) {
     if (!serpFlight.flights || serpFlight.flights.length === 0) continue;
 
+    // Skip flights with no price data (likely invalid or unavailable)
+    if (!serpFlight.price || serpFlight.price <= 0) continue;
+
     const segments = serpFlight.flights;
     const firstSeg = segments[0];
     const lastSeg = segments[segments.length - 1];
@@ -111,7 +114,7 @@ function processFlights(
       cabinOverride || mapTravelClassDisplay(firstSeg.travel_class || "Economy");
 
     // Price per passenger
-    const totalPrice = serpFlight.price || 0;
+    const totalPrice = serpFlight.price;
     const perPassengerPrice = totalPrice / adults;
 
     // Seats left (from extensions)
