@@ -11,20 +11,24 @@ const CABIN_DISPLAY: Record<string, string> = {
   first: "First",
 };
 
-/** Duffel ISO 8601 duration (e.g. "PT2H30M" or "PT14H5M") → "2h 30m" */
+/** ISO 8601 duration (e.g. "PT2H30M", "P1DT2H20M") → "26h 20m" */
 function formatDuration(iso: string): string {
-  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+  const match = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/);
   if (!match) return iso;
-  const hours = match[1] ? `${match[1]}h` : "";
-  const minutes = match[2] ? ` ${match[2]}m` : "";
-  return `${hours}${minutes}`.trim() || "0m";
+  const days = parseInt(match[1] || "0");
+  const hours = parseInt(match[2] || "0") + days * 24;
+  const minutes = parseInt(match[3] || "0");
+  const h = hours ? `${hours}h` : "";
+  const m = minutes ? ` ${minutes}m` : "";
+  return `${h}${m}`.trim() || "0m";
 }
 
 /** ISO 8601 duration → total minutes */
 function durationToMinutes(iso: string): number {
-  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+  const match = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/);
   if (!match) return 0;
-  return parseInt(match[1] || "0") * 60 + parseInt(match[2] || "0");
+  const days = parseInt(match[1] || "0");
+  return days * 1440 + parseInt(match[2] || "0") * 60 + parseInt(match[3] || "0");
 }
 
 /** Calculate duration between two ISO timestamps → ISO 8601 duration string */
