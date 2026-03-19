@@ -8,7 +8,7 @@ import type {
   CabinAvailability,
   SearchParams,
 } from "@/lib/types";
-import { getBookingLinks } from "@/lib/booking";
+import { getBookingLinks, getSeatCheckUrl } from "@/lib/booking";
 import { AIRPORTS } from "@/lib/airports";
 
 /** Lookup city name from IATA code */
@@ -102,6 +102,39 @@ function SeatBadge({ seats }: { seats: number | null }) {
     >
       🔥 {label} left
     </span>
+  );
+}
+
+function SeatCheckButton({
+  flight,
+  searchParams,
+}: {
+  flight: FlightOffer;
+  searchParams: SearchParams | null;
+}) {
+  const url = getSeatCheckUrl({
+    airlineCode: flight.airlineCode,
+    origin: flight.departure,
+    destination: flight.arrival,
+    departureDate: flight.departureTime,
+    adults: searchParams?.adults || 1,
+    cabinClass: flight.cabins[0]?.cabin,
+  });
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+      title="Check exact seat availability on airline website"
+    >
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+      </svg>
+      Check Seats
+    </a>
   );
 }
 
@@ -432,10 +465,13 @@ function FlightTable({
                 )}
               </td>
               <td className="py-4 px-4 text-right">
-                <BookingDropdown
-                  flight={f}
-                  searchParams={searchParams}
-                />
+                <div className="flex flex-col items-end gap-1.5">
+                  <SeatCheckButton flight={f} searchParams={searchParams} />
+                  <BookingDropdown
+                    flight={f}
+                    searchParams={searchParams}
+                  />
+                </div>
               </td>
             </tr>
           ))}
@@ -520,7 +556,8 @@ function FlightCards({
           </div>
 
           {/* Booking */}
-          <div className="pt-3 mt-3 border-t border-gray-100 flex justify-end">
+          <div className="pt-3 mt-3 border-t border-gray-100 flex items-center justify-between">
+            <SeatCheckButton flight={f} searchParams={searchParams} />
             <BookingDropdown flight={f} searchParams={searchParams} />
           </div>
         </div>
