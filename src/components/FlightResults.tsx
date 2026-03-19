@@ -9,6 +9,18 @@ import type {
   SearchParams,
 } from "@/lib/types";
 import { getBookingLinks } from "@/lib/booking";
+import { AIRPORTS } from "@/lib/airports";
+
+/** Lookup city name from IATA code */
+const airportCityMap = new Map(AIRPORTS.map((a) => [a.iata, a.city]));
+function cityName(iata: string): string {
+  return airportCityMap.get(iata) || "";
+}
+/** Format "SIN" → "SIN - Singapore" */
+function fmtAirport(iata: string): string {
+  const city = cityName(iata);
+  return city ? `${iata} - ${city}` : iata;
+}
 
 /* ================================================================
    Props
@@ -389,7 +401,7 @@ function FlightTable({
                   {fmtTime(f.departureTime)}
                 </div>
                 <div className="text-xs text-gray-500">
-                  {f.departure} · {fmtDate(f.departureTime)}
+                  {fmtAirport(f.departure)} · {fmtDate(f.departureTime)}
                 </div>
               </td>
               <td className="py-4 px-4">
@@ -397,7 +409,7 @@ function FlightTable({
                   {fmtTime(f.arrivalTime)}
                 </div>
                 <div className="text-xs text-gray-500">
-                  {f.arrival} · {fmtDate(f.arrivalTime)}
+                  {fmtAirport(f.arrival)} · {fmtDate(f.arrivalTime)}
                 </div>
               </td>
               <td className="py-4 px-4 text-sm text-gray-700">
@@ -482,7 +494,7 @@ function FlightCards({
               <div className="font-bold text-lg text-gray-900">
                 {fmtTime(f.departureTime)}
               </div>
-              <div className="text-xs text-gray-500">{f.departure}</div>
+              <div className="text-xs text-gray-500">{fmtAirport(f.departure)}</div>
             </div>
             <div className="flex-1 flex flex-col items-center">
               <div className="text-xs text-gray-400 mb-1">{f.duration}</div>
@@ -498,7 +510,7 @@ function FlightCards({
               <div className="font-bold text-lg text-gray-900">
                 {fmtTime(f.arrivalTime)}
               </div>
-              <div className="text-xs text-gray-500">{f.arrival}</div>
+              <div className="text-xs text-gray-500">{fmtAirport(f.arrival)}</div>
             </div>
           </div>
 
