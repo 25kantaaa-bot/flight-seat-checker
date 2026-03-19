@@ -53,21 +53,36 @@ function formatDuration(minutes: number): string {
   return `${hStr}${mStr}`.trim() || "0m";
 }
 
-/** Parse SerpApi time string "2026-03-25 at 10:30" or ISO format to ISO string */
+/**
+ * Parse SerpApi time string to a consistent "YYYY-MM-DDTHH:MM" format.
+ * SerpApi returns local airport times like "2026-03-25 10:30" — we must
+ * preserve them as-is (no timezone conversion) so the UI shows correct
+ * departure/arrival times in the airport's local timezone.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function parseTime(timeStr: string, dateHint?: string): string {
-  // Handle "HH:MM" format with a date from somewhere
-  if (/^\d{2}:\d{2}$/.test(timeStr) && dateHint) {
-    return `${dateHint}T${timeStr}:00`;
+  if (!timeStr) return "";
+  // Already in ISO-like format without timezone
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(timeStr)) {
+    // Strip any timezone suffix to keep it as local time
+    return timeStr.replace(/[Z+].*$/, "");
   }
-  // Handle ISO format
-  if (timeStr.includes("T")) return timeStr;
-  // Handle "2026-03-25 at 10:30 AM" or similar
-  const cleaned = timeStr
-    .replace(" at ", "T")
-    .replace(/\s*(AM|PM)/i, (_, period) => ` ${period}`);
-  // Try to parse
-  const d = new Date(cleaned);
-  if (!isNaN(d.getTime())) return d.toISOString();
+  // "2026-03-25 10:30" → "2026-03-25T10:30"
+  const spaceMatch = timeStr.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})(.*)$/);
+  if (spaceMatch) {
+    const [, date, time] = spaceMatch;
+    const [h, m] = time.split(":");
+    return `${date}T${h.padStart(2, "0")}:${m}`;
+  }
+  // "2026-03-25 at 10:30 AM" style
+  const atMatch = timeStr.match(/^(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (atMatch) {
+    const [, date, hourStr, min, period] = atMatch;
+    let hour = parseInt(hourStr);
+    if (period?.toUpperCase() === "PM" && hour < 12) hour += 12;
+    if (period?.toUpperCase() === "AM" && hour === 12) hour = 0;
+    return `${date}T${String(hour).padStart(2, "0")}:${min}`;
+  }
   return timeStr;
 }
 

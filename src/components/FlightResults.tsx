@@ -24,19 +24,27 @@ interface Props {
    Helpers
    ================================================================ */
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+/**
+ * Format time from "YYYY-MM-DDTHH:MM" → "HH:MM"
+ * We do NOT use new Date() to avoid timezone conversion —
+ * the time is already in the airport's local timezone.
+ */
+function fmtTime(timeStr: string): string {
+  const match = timeStr.match(/T(\d{2}:\d{2})/);
+  return match ? match[1] : timeStr;
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+/**
+ * Format date from "YYYY-MM-DDTHH:MM" → "Mar 25" etc.
+ * Parse manually to avoid timezone shifts.
+ */
+function fmtDate(timeStr: string): string {
+  const match = timeStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return timeStr;
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const month = months[parseInt(match[2]) - 1] || match[2];
+  const day = parseInt(match[3]);
+  return `${month} ${day}`;
 }
 
 function usd(n: number): string {
