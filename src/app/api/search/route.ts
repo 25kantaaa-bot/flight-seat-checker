@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchAllCabins, searchFlights } from "@/lib/duffel";
+import { searchAllCabins, searchFlights, getSeatMapsForOffers } from "@/lib/duffel";
 import { getAirlineName } from "@/lib/airlines";
 import type { FlightOffer, CabinAvailability } from "@/lib/types";
 
@@ -131,6 +131,8 @@ export async function GET(request: NextRequest) {
 
     // Group offers by flight identity
     const flightMap = new Map<string, FlightOffer>();
+    // Track one offer ID per flight key for seat map lookups
+    const flightOfferIds = new Map<string, string>();
 
     for (const rawOffer of allOffers) {
       const offer = rawOffer as DuffelOffer;
@@ -166,6 +168,11 @@ export async function GET(request: NextRequest) {
 
       // Calculate total duration
       const sliceDuration = firstSlice.duration || calcDuration(firstSeg.departing_at, lastSeg.arriving_at);
+
+      // Store first offer ID for this flight (for seat map lookup)
+      if (!flightOfferIds.has(flightKey)) {
+        flightOfferIds.set(flightKey, offer.id);
+      }
 
       if (flightMap.has(flightKey)) {
         const existing = flightMap.get(flightKey)!;
@@ -206,6 +213,33 @@ export async function GET(request: NextRequest) {
             duration: formatDuration(seg.duration || calcDuration(seg.departing_at, seg.arriving_at)),
           })),
         } satisfies FlightOffer);
+      }
+    }
+
+    // Fetch seat maps to get real availability counts
+    const seatMapRequests = Array.from(flightOfferIds.entries()).map(
+      ([flightKey, offerId]) => ({ offerId, flightKey })
+    );
+    const seatMapData = await getSeatMapsForOffers(seatMapRequests);
+
+    // Cabin class display name → Duffel cabin class key mapping
+    const displayToDuffel: Record<string, string> = {
+      "Economy": "economy",
+      "Premium Econ": "premium_economy",
+      "Business": "business",
+      "First": "first",
+    };
+
+    // Merge seat counts into flight cabins
+    for (const [flightKey, flight] of flightMap) {
+      const counts = seatMapData.get(flightKey);
+      if (counts) {
+        for (const cabin of flight.cabins) {
+          const duffelClass = displayToDuffel[cabin.cabin] || cabin.bookingClass;
+          if (duffelClass in counts) {
+            cabin.seatsAvailable = counts[duffelClass];
+          }
+        }
       }
     }
 
